@@ -1,0 +1,17 @@
+{
+  "name": "streamperu-backend",
+  "version": "1.0.0",
+  "description": "StreamPeru - API REST minima de catalogo de streaming (Caso 6 - TA1)",
+  "main": "src/app.js",
+  "scripts": {
+    "start": "node src/app.js",
+    "test": "jest --colors"
+  },
+  "dependencies": {
+    "express": "^4.19.2"
+  },
+  "devDependencies": {
+    "jest": "^29.7.0",
+    "supertest": "^7.0.0"
+  }
+}

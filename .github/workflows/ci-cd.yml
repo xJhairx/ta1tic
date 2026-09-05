@@ -28,7 +28,8 @@ jobs:
         run: npm ci
 
       - name: Verificar que la app arranca (build check)
-        run: node -e "require('./src/app.js'); console.log('Build OK: app.js carga sin errores');"
+        run: |
+          node -e "require('./src/app.js'); console.log('Build OK: app.js carga sin errores');"
 
   # ---------------------------------------------------------------
   # 2) PRUEBAS AUTOMATIZADAS: ejecuta Jest + Supertest

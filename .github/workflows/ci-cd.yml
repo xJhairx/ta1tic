@@ -1,0 +1,116 @@
+name: CI/CD StreamPeru
+
+# Se dispara en cada push a main y en cada Pull Request hacia main.
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  # ---------------------------------------------------------------
+  # 1) COMPILACION / BUILD: instala dependencias y prepara artefacto
+  # ---------------------------------------------------------------
+  build:
+    name: Build
+    runs-on: ubuntu-latest
+    steps:
+      - name: Clonar repositorio
+        uses: actions/checkout@v4
+
+      - name: Configurar Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      - name: Instalar dependencias
+        run: npm ci
+
+      - name: Verificar que la app arranca (build check)
+        run: node -e "require('./src/app.js'); console.log('Build OK: app.js carga sin errores');"
+
+  # ---------------------------------------------------------------
+  # 2) PRUEBAS AUTOMATIZADAS: ejecuta Jest + Supertest
+  # ---------------------------------------------------------------
+  test:
+    name: Pruebas automatizadas
+    runs-on: ubuntu-latest
+    needs: build
+    steps:
+      - name: Clonar repositorio
+        uses: actions/checkout@v4
+
+      - name: Configurar Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      - name: Instalar dependencias
+        run: npm ci
+
+      - name: Ejecutar pruebas (Jest)
+        run: npm test
+
+  # ---------------------------------------------------------------
+  # 3) DESPLIEGUE BLUE-GREEN (simulado) + INVALIDACION DE CACHE CDN
+  #    Solo corre en push a main y solo si build y test pasaron.
+  # ---------------------------------------------------------------
+  deploy:
+    name: Despliegue Blue-Green (simulado)
+    runs-on: ubuntu-latest
+    needs: [ build, test ]
+    if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+    steps:
+      - name: Clonar repositorio
+        uses: actions/checkout@v4
+
+      - name: Configurar Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      - name: Instalar dependencias
+        run: npm ci
+
+      # Paso 1: levantar el entorno GREEN (nueva version) en segundo plano.
+      - name: Levantar entorno GREEN (nueva version)
+        run: |
+          PORT=3001 node src/app.js &
+          echo "GREEN_PID=$!" >> $GITHUB_ENV
+          sleep 3
+          echo "Entorno GREEN levantado en el puerto 3001"
+
+      # Paso 2: health check sobre GREEN antes de enviarle trafico.
+      - name: Health check de GREEN
+        run: |
+          STATUS=$(curl -s -o /dev/null -w "%{http_code}" http://localhost:3001/health)
+          if [ "$STATUS" != "200" ]; then
+            echo "Health check FALLO (HTTP $STATUS). Se aborta el switch."
+            exit 1
+          fi
+          echo "Health check OK (HTTP 200). GREEN esta sano."
+
+      # Paso 3: switch de trafico BLUE -> GREEN (simulado).
+      - name: Switch de trafico Blue -> Green
+        run: |
+          echo "Redirigiendo trafico del entorno BLUE (actual) al GREEN (nuevo)..."
+          echo "Switch completado. GREEN es ahora la version en produccion."
+
+      # Paso 4 (CLAVE del Caso 6): invalidacion de cache del CDN.
+      # Se invoca el endpoint /internal/cache/invalidate de la nueva version.
+      - name: Invalidar cache del CDN
+        run: |
+          RESP=$(curl -s -X POST http://localhost:3001/internal/cache/invalidate \
+            -H "Content-Type: application/json" \
+            -d '{"paths":["/catalog","/catalog/1","/catalog/2","/catalog/3"]}')
+          echo "Respuesta de invalidacion: $RESP"
+          echo "$RESP" | grep -q "cdn-inv-" && echo "Cache del CDN invalidada correctamente." || (echo "Fallo la invalidacion de cache" && exit 1)
+
+      # Paso 5: apagar el entorno BLUE anterior (simulado).
+      - name: Retirar entorno BLUE anterior
+        run: |
+          echo "Entorno BLUE anterior retirado. Despliegue con minima indisponibilidad completado."
+          kill ${GREEN_PID} || true
